@@ -1,0 +1,12 @@
+# HTTPS и раздача Mini App. Mini App и Product API появятся в этапе 3,
+# до тех пор /api/* отвечает 502. Без HTTPS Telegram Mini App не откроет.
+{$DOMAIN} {
+	encode zstd gzip
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+	handle {
+		root * /srv/miniapp
+		file_server
+	}
+}

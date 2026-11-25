@@ -1,0 +1,100 @@
+# Базу и миграции поднимает `docker compose up -d`.
+# Процессы приложения пока под профилем app: `docker compose --profile app up -d`.
+# Профиль снимается с процесса в задаче, где появляется его работа.
+# Лимиты памяти — из .env: сервер общий с Velora и Flowscope.
+name: econ-analyst-bot
+
+x-app-env: &app-env
+  NODE_ENV: ${NODE_ENV:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgres://analyst:${ANALYST_DB_PASSWORD}@analyst-db:5432/analyst
+  DB_POOL_MAX: ${DB_POOL_MAX:-5}
+
+x-app: &app
+  image: econ-analyst-bot:local
+  pull_policy: never
+  restart: unless-stopped
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  analyst-db:
+    image: postgres:16
+    command: ["postgres", "-c", "timezone=UTC", "-c", "log_timezone=UTC"]
+    environment:
+      POSTGRES_DB: analyst
+      POSTGRES_USER: analyst
+      POSTGRES_PASSWORD: ${ANALYST_DB_PASSWORD:?задайте ANALYST_DB_PASSWORD в .env}
+    ports:
+      - "127.0.0.1:${ANALYST_DB_PORT:-5433}:5432"
+    volumes:
+      - analyst-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analyst -d analyst"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: ${MEM_ANALYST_DB:-512m}
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    image: econ-analyst-bot:local
+    command: ["migrate"]
+    environment: *app-env
+    depends_on:
+      analyst-db:
+        condition: service_healthy
+    mem_limit: ${MEM_MIGRATE:-128m}
+    restart: "no"
+
+  collector:
+    <<: *app
+    profiles: ["app"]
+    command: ["collector"]
+    environment: *app-env
+    mem_limit: ${MEM_COLLECTOR:-256m}
+
+  engine:
+    <<: *app
+    profiles: ["app"]
+    command: ["engine"]
+    environment: *app-env
+    mem_limit: ${MEM_ENGINE:-384m}
+
+  api:
+    <<: *app
+    profiles: ["app"]
+    command: ["api"]
+    environment: *app-env
+    mem_limit: ${MEM_API:-256m}
+
+  bot:
+    <<: *app
+    profiles: ["app"]
+    command: ["bot"]
+    environment: *app-env
+    mem_limit: ${MEM_BOT:-192m}
+
+  caddy:
+    image: caddy:2
+    profiles: ["app"]
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+    mem_limit: ${MEM_CADDY:-128m}
+    restart: unless-stopped
+
+volumes:
+  analyst-db:
+  caddy-data:
+  caddy-config:
