@@ -53,10 +53,11 @@ afterAll(async () => {
 });
 
 describe("миграции на чистой базе", () => {
-  it("первый запуск применяет 001–004", async () => {
+  it("первый запуск применяет все миграции по порядку", async () => {
     const files = await readMigrations(MIGRATIONS);
     const r = await migrate(pool, files, silent);
-    expect(r.applied).toEqual(["001_core.sql", "002_news.sql", "003_insight.sql", "004_users.sql"]);
+    expect(r.applied).toEqual(files.map((f) => f.name));
+    expect(r.applied.slice(0, 4)).toEqual(["001_core.sql", "002_news.sql", "003_insight.sql", "004_users.sql"]);
   });
 
   it("повторный запуск ничего не применяет и не меняет схему", async () => {
@@ -87,12 +88,12 @@ describe("миграции на чистой базе", () => {
     const dir = await mkdtemp(path.join(tmpdir(), "migrations-"));
     try {
       await cp(MIGRATIONS, dir, { recursive: true });
-      await appendFile(path.join(dir, "005_broken.sql"), "create table half_done (id int);\nselect * from no_such_table;\n");
-      await expect(migrate(pool, await readMigrations(dir), silent)).rejects.toThrow(/005_broken\.sql не применилась/);
+      await appendFile(path.join(dir, "999_broken.sql"), "create table half_done (id int);\nselect * from no_such_table;\n");
+      await expect(migrate(pool, await readMigrations(dir), silent)).rejects.toThrow(/999_broken\.sql не применилась/);
       const { rows } = await pool.query("select to_regclass('public.half_done') as t");
       expect(rows[0].t).toBeNull();
       const applied = await pool.query("select count(*)::int as n from schema_migrations");
-      expect(applied.rows[0].n).toBe(4);
+      expect(applied.rows[0].n).toBe((await readMigrations(MIGRATIONS)).length);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
